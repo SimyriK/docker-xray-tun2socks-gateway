@@ -1,0 +1,97 @@
+# macvlan и переменные — .env.example. Образ gateway: docker compose build --pull gateway
+# config-keeper: подписка → config/, Webui (:WEBUI_PORT), снаружи Traefik (labels, сеть proxy)
+
+name: xray-tun2socks-gateway
+
+networks:
+  vpn_lan:
+    external: true
+    name: ${VPN_LAN_DOCKER_NETWORK}
+  proxy:
+    external: true
+    name: proxy
+
+services:
+  config-keeper:
+    image: python:3.12-alpine
+    container_name: xray-gateway-config-keeper
+    restart: unless-stopped
+    working_dir: /app
+    networks:
+      - proxy
+    volumes:
+      - .:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+    env_file:
+      - .env
+    environment:
+      SKIP_COMPOSE_RENDER: ${SKIP_COMPOSE_RENDER}
+      SUBSCRIPTION_UPDATE_INTERVAL: ${SUBSCRIPTION_UPDATE_INTERVAL}
+      GATEWAY_CONTAINER_NAME: ${GATEWAY_CONTAINER_NAME}
+      WEBUI_PORT: ${WEBUI_PORT}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.${TRAEFIK_NAME}.entrypoints=http"
+      - "traefik.http.routers.${TRAEFIK_NAME}.rule=Host(`${PUBLIC_HOST}`)"
+      - "traefik.http.middlewares.${TRAEFIK_NAME}-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.routers.${TRAEFIK_NAME}.middlewares=${TRAEFIK_NAME}-allow,${TRAEFIK_NAME}-https-redirect"
+      - "traefik.http.routers.${TRAEFIK_NAME}-secure.entrypoints=https"
+      - "traefik.http.routers.${TRAEFIK_NAME}-secure.rule=Host(`${PUBLIC_HOST}`)"
+      - "traefik.http.routers.${TRAEFIK_NAME}-secure.tls=true"
+      - "traefik.http.routers.${TRAEFIK_NAME}-secure.tls.certresolver=${TRAEFIK_CERT_RESOLVER}"
+      - "traefik.http.routers.${TRAEFIK_NAME}-secure.service=${TRAEFIK_NAME}"
+      - "traefik.http.routers.${TRAEFIK_NAME}-secure.tls.domains[0].main=${TLS_DOMAIN_MAIN}"
+      - "traefik.http.routers.${TRAEFIK_NAME}-secure.tls.domains[0].sans=${TLS_DOMAIN_SANS}"
+      - "traefik.http.services.${TRAEFIK_NAME}.loadbalancer.server.port=${WEBUI_PORT}"
+      - "traefik.http.services.${TRAEFIK_NAME}.loadbalancer.passHostHeader=true"
+      - "traefik.http.middlewares.${TRAEFIK_NAME}-allow.ipAllowList.sourceRange=${TRAEFIK_IP_ALLOWLIST}"
+      - "traefik.http.middlewares.${TRAEFIK_NAME}-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
+      - "traefik.http.middlewares.${TRAEFIK_NAME}-headers.headers.stsSeconds=63072000"
+      - "traefik.http.middlewares.${TRAEFIK_NAME}-headers.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.${TRAEFIK_NAME}-headers.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.${TRAEFIK_NAME}-headers.headers.frameDeny=true"
+      - "traefik.http.middlewares.${TRAEFIK_NAME}-headers.headers.referrerPolicy=no-referrer"
+      - "traefik.http.middlewares.${TRAEFIK_NAME}-gzip.compress=true"
+      - "traefik.http.routers.${TRAEFIK_NAME}-secure.middlewares=${TRAEFIK_NAME}-allow,${TRAEFIK_NAME}-headers,${TRAEFIK_NAME}-gzip"
+    entrypoint: ["/bin/sh", "/app/scripts/subscription_cron.sh"]
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/config-keeper-ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 120s
+
+  gateway:
+    build: .
+    image: xray-tun2socks-gateway:local
+    container_name: xray-gateway
+    restart: unless-stopped
+    depends_on:
+      config-keeper:
+        condition: service_healthy
+    networks:
+      vpn_lan:
+        ipv4_address: ${VPN_CONTAINER_IP}
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.rp_filter=0
+      - net.ipv4.conf.default.rp_filter=0
+    env_file:
+      - config/tun_excluded_routes.env
+    environment:
+      PROXY: socks5://${XRAY_SOCKS_LISTEN}:${XRAY_SOCKS_PORT}
+      TUN: ${TUN_DEVICE}
+      FWMARK: ${FWMARK}
+      LOGLEVEL: ${TUN2SOCKS_LOG}
+      TCP_SNDBUF: ${TUN2SOCKS_TCP_SNDBUF}
+      TCP_RCVBUF: ${TUN2SOCKS_TCP_RCVBUF}
+    volumes:
+      - ./config/config.json:/etc/xray/config.json:ro
+      - ./config/tun_excluded_routes.env:/etc/tun_excluded_routes.env:ro
+      - ./scripts/tun2socks_netns_bootstrap.sh:/tun2socks_netns_bootstrap.sh:ro
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    privileged: true

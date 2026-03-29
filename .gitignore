@@ -1,0 +1,6 @@
+.env
+config/config.json
+config/tun_excluded_routes.env
+config/subscription.cache
+**/__pycache__/
+*.py[cod]
