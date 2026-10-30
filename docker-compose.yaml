@@ -29,6 +29,10 @@ services:
       SUBSCRIPTION_UPDATE_INTERVAL: ${SUBSCRIPTION_UPDATE_INTERVAL}
       GATEWAY_CONTAINER_NAME: ${GATEWAY_CONTAINER_NAME}
       WEBUI_PORT: ${WEBUI_PORT}
+      HEALTH_PATH_URL: ${HEALTH_PATH_URL}
+      HEALTH_PATH_INTERVAL: ${HEALTH_PATH_INTERVAL}
+      HEALTH_PROFILE_INTERVAL: ${HEALTH_PROFILE_INTERVAL}
+      HEALTH_PATH_TIMEOUT: ${HEALTH_PATH_TIMEOUT}
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=proxy"
@@ -82,10 +86,12 @@ services:
     environment:
       PROXY: socks5://${XRAY_SOCKS_LISTEN}:${XRAY_SOCKS_PORT}
       TUN: ${TUN_DEVICE}
+      MTU: ${TUN_MTU}
       FWMARK: ${FWMARK}
       LOGLEVEL: ${TUN2SOCKS_LOG}
       TCP_SNDBUF: ${TUN2SOCKS_TCP_SNDBUF}
       TCP_RCVBUF: ${TUN2SOCKS_TCP_RCVBUF}
+      TUN_MTU: ${TUN_MTU}
     volumes:
       - ./config/config.json:/etc/xray/config.json:ro
       - ./config/tun_excluded_routes.env:/etc/tun_excluded_routes.env:ro

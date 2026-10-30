@@ -3,10 +3,19 @@
 # При docker restart namespace сохраняется — старые правила чистятся перед добавлением новых.
 
 FWMARK_VAL="${FWMARK:-0x22b}"
+TUN_DEV="${TUN:-${TUN_DEVICE:-tun0}}"
+TUN_MTU_VAL="${TUN_MTU:-${MTU:-1500}}"
 
 sysctl -w net.ipv4.conf.all.rp_filter=0 2>/dev/null || true
 sysctl -w net.ipv4.conf.default.rp_filter=0 2>/dev/null || true
 iptables -P FORWARD ACCEPT 2>/dev/null || true
+
+# Страховка: даже если tun2socks поднимет MTU позже, выставим разумный размер кадра
+if ip link show "${TUN_DEV}" >/dev/null 2>&1; then
+  if ip link set dev "${TUN_DEV}" mtu "${TUN_MTU_VAL}" 2>/dev/null; then
+    echo "tun2socks_netns_bootstrap: ${TUN_DEV} mtu=${TUN_MTU_VAL}"
+  fi
+fi
 
 # Очистка ip rules priority 50 и mangle OUTPUT от предыдущего запуска
 while ip rule del pref 50 2>/dev/null; do :; done
